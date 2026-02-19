@@ -45,6 +45,8 @@ public class SensorDataConsumer
         }
         catch (OperationCanceledException)
         {
+            // Считаем, что отмена это "завершение" и должно завершаться gracefully. 
+            // Но можем и не дочитывать сообщения, а сразу выходить
             await DrainBatchAndProcessAsync(buffer, CancellationToken.None);
             throw;
         }

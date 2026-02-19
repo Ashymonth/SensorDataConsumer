@@ -12,7 +12,6 @@ services.AddSingleton<SensorProcessor>();
 services.AddSingleton<SensorDataProducer>();
 services.AddSingleton<SensorDataDeduplicator>();
 services.AddSingleton<SensorDataConsumer.Services.SensorDataConsumer>();
-services.AddSingleton<SensorDataBuffer>();
 services.AddSingleton<SensorProcessorOptions>();
 services.AddSingleton<IDataDestination, RetryingDataDestination>();
 services.AddSingleton<IMessageSource, FakeMessageSource>();

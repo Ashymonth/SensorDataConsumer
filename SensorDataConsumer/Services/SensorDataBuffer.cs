@@ -14,8 +14,8 @@ public sealed class SensorDataBuffer : IDisposable
     public SensorDataBuffer(SensorProcessorOptions options)
     {
         // тут так же можем указать Bounded и прокинуть сюда BatchMaxSize
-        _channel = Channel.CreateUnbounded<Message<SensorData>>(
-            new UnboundedChannelOptions
+        _channel = Channel.CreateBounded<Message<SensorData>>(
+            new BoundedChannelOptions(options.MaxMessageBufferSize)
             {
                 SingleReader = true,
                 SingleWriter = true
@@ -23,7 +23,7 @@ public sealed class SensorDataBuffer : IDisposable
 
         _timer = new PeriodicTimer(options.FlushInterval);
     }
-
+ 
     public bool IsFinished => _channel.Reader.Completion.IsCompleted;
 
     public ValueTask WriteAsync(Message<SensorData> message, CancellationToken cancellationToken) =>

@@ -16,33 +16,19 @@ public class SensorDataProducer
         _logger = logger;
     }
 
-    public async Task ProduceAsync(CancellationToken cancellationToken)
+    public async Task ProduceAsync(CancellationToken ct)
     {
-        try
+        while (true)
         {
-            while (true)
-            {
-                var message = await _source.ReceiveAsync(cancellationToken);
-                if (message is null)
-                {
-                    // Source исчерпан — сигнализируем consumer что новых сообщений не будет.
-                    _dataQueue.Complete();
-                    return;
-                }
+            var message = await _source.ReceiveAsync(ct);
 
-                await _dataQueue.Writer.WriteAsync(message, cancellationToken);
+            if (message is null)
+            {
+                _logger.LogInformation("Source exhausted, stopping producer");
+                return;
             }
-        }
-        catch (OperationCanceledException)
-        {
-            _dataQueue.Complete();
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Producer failed unexpectedly.");
-            _dataQueue.Complete(ex);
-            throw;
+
+            await _dataQueue.Writer.WriteAsync(message, ct);
         }
     }
 }

@@ -1,4 +1,3 @@
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using SensorDataConsumer.Abstractions;
 using SensorDataConsumer.Extensions;
@@ -14,43 +13,50 @@ public class SensorDataConsumer
     private readonly MessageBatcher _batcher;
     private readonly ILogger<SensorDataConsumer> _logger;
 
-    public SensorDataConsumer(IDataDestination destination,
-        ILogger<SensorDataConsumer> logger, MessageBatcher batcher)
+    public SensorDataConsumer(IDataDestination destination, MessageBatcher batcher, ILogger<SensorDataConsumer> logger)
     {
         _destination = destination;
         _batcher = batcher;
         _logger = logger;
     }
 
-    public async Task ConsumeAsync(CancellationToken cancellationToken)
+    public async Task ConsumeAsync(CancellationToken ct)
     {
-        while (!cancellationToken.IsCancellationRequested)
+        // можно так же вынести в конфиг
+        var consecutiveFailures = 0;
+        const int maxConsecutiveFailures = 3;
+
+        while (!ct.IsCancellationRequested)
         {
             try
             {
-                await foreach (var batch in _batcher.CreateBatchesAsync(cancellationToken))
+                await foreach (var batch in _batcher.CreateBatchesAsync(ct))
                 {
-                    await ProcessBatchAsync(batch, cancellationToken);
+                    await ProcessBatchAsync(batch, ct);
+                    consecutiveFailures = 0;
                 }
-
-                // CreateBatchesAsync завершился штатно (канал закрыт) — выходим
-                _logger.LogInformation("Channel closed, consumer stopping");
-                return;
+ 
+                return; // канал закрыт штатно
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException)
             {
-                _logger.LogInformation("Consumer stopping due to cancellation");
-                break;
+                await DrainRemainingBatchesAsync();
+                return;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Consumer failed, restarting in {Delay}", DelayAfterFailure);
+                consecutiveFailures++;
+                
+                _logger.LogError(ex, "Consumer failed ({Failures}/{Max})", consecutiveFailures, maxConsecutiveFailures);
 
-                await Task.Delay(DelayAfterFailure, cancellationToken);
+                if (consecutiveFailures >= maxConsecutiveFailures)
+                {
+                    throw; 
+                }
+
+                await Task.Delay(DelayAfterFailure, ct);
             }
         }
-
-        await DrainRemainingBatchesAsync();
     }
     
     private async Task DrainRemainingBatchesAsync()
@@ -127,6 +133,9 @@ public class SensorDataConsumer
                 catch (DbUpdateException)
                 {
                     _logger.LogError("DbUpdate failed for message: {Message}", message.Data);
+                    
+                    // в случае если можем получить точную причину ошибки в DbUpdateException, то можем по разному ack/nack делать,
+                    // но в таком виде считаем, что может быть транзитная ошибка БД и ретраим сообщение
                     await message.NackAsync(true);
                 }
                 catch

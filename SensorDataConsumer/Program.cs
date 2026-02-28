@@ -1,24 +1,25 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SensorDataConsumer;
 using SensorDataConsumer.Abstractions;
+using SensorDataConsumer.Background;
 using SensorDataConsumer.Services;
 
-var services = new ServiceCollection();
+var builder = Host.CreateApplicationBuilder(args);
+ 
+builder.Services.AddLogging(b => b.AddConsole().AddDebug());
+ 
+builder.Services.AddSingleton<SensorDataProducer>();
+builder.Services.AddSingleton<MessageBatcher>();
+builder.Services.AddSingleton<SensorDataQueue>();
+builder.Services.AddSingleton<SensorDataConsumer.Services.SensorDataConsumer>();
+builder.Services.AddSingleton<SensorProcessorOptions>();
+builder.Services.AddSingleton<IDataDestination, RetryingDataDestination>();
+builder.Services.AddSingleton<IMessageSource, FakeMessageSource>();
 
-services.AddLogging(b => b.AddConsole().AddDebug());
+builder.Services.AddHostedService<SensorProcessorBackgroundService>();
+ 
+var app = builder.Build();
 
-services.AddSingleton<SensorProcessor>();
-services.AddSingleton<SensorDataProducer>();
-services.AddSingleton<MessageBatcher>();
-services.AddSingleton<SensorDataQueue>();
-services.AddSingleton<SensorDataConsumer.Services.SensorDataConsumer>();
-services.AddSingleton<SensorProcessorOptions>();
-services.AddSingleton<IDataDestination, RetryingDataDestination>();
-services.AddSingleton<IMessageSource, FakeMessageSource>();
-
-var provider = services.BuildServiceProvider();
-
-var processor = provider.GetRequiredService<SensorProcessor>();
-
-await processor.RunAsync(CancellationToken.None);
+await app.RunAsync(); 

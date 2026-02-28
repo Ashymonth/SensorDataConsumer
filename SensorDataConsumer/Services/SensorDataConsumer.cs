@@ -8,57 +8,61 @@ namespace SensorDataConsumer.Services;
 
 public class SensorDataConsumer
 {
-    private readonly SensorDataDeduplicator _deduplicator;
-    private readonly SensorProcessorOptions _options;
+    private static readonly TimeSpan DelayAfterFailure = TimeSpan.FromSeconds(1);
+    
     private readonly IDataDestination _destination;
+    private readonly MessageBatcher _batcher;
     private readonly ILogger<SensorDataConsumer> _logger;
 
-    public SensorDataConsumer(SensorDataDeduplicator deduplicator,
-        SensorProcessorOptions options,
-        IDataDestination destination,
-        ILogger<SensorDataConsumer> logger)
+    public SensorDataConsumer(IDataDestination destination,
+        ILogger<SensorDataConsumer> logger, MessageBatcher batcher)
     {
-        _deduplicator = deduplicator;
-        _options = options;
         _destination = destination;
+        _batcher = batcher;
         _logger = logger;
     }
 
-    public async Task ConsumeAsync(SensorDataBuffer buffer, CancellationToken cancellationToken)
+    public async Task ConsumeAsync(CancellationToken cancellationToken)
     {
-        try
+        while (!cancellationToken.IsCancellationRequested)
         {
-            while (await buffer.WaitForNextTickAsync(cancellationToken))
+            try
             {
-                await DrainBatchAndProcessAsync(buffer, cancellationToken);
-
-                if (!buffer.IsFinished)
+                await foreach (var batch in _batcher.CreateBatchesAsync(cancellationToken))
                 {
-                    continue;
+                    await ProcessBatchAsync(batch, cancellationToken);
                 }
-                // Source завершил работу — DrainBatchAndProcessAsync уже всё вычитал,
-                // но между последним Drain и этой проверкой producer мог дописать.
-                // Делаем финальный DrainBatchAndProcessAsync на всякий случай.
-                await DrainBatchAndProcessAsync(buffer, cancellationToken);
+
+                // CreateBatchesAsync завершился штатно (канал закрыт) — выходим
+                _logger.LogInformation("Channel closed, consumer stopping");
                 return;
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // Считаем, что отмена это "завершение" и должно завершаться gracefully. 
-            // Но можем и не дочитывать сообщения, а сразу выходить
-            await DrainBatchAndProcessAsync(buffer, CancellationToken.None);
-            throw;
-        }
-    }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogInformation("Consumer stopping due to cancellation");
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Consumer failed, restarting in {Delay}", DelayAfterFailure);
 
-    private async Task DrainBatchAndProcessAsync(SensorDataBuffer dataBuffer, CancellationToken cancellationToken)
+                await Task.Delay(DelayAfterFailure, cancellationToken);
+            }
+        }
+
+        await DrainRemainingBatchesAsync();
+    }
+    
+    private async Task DrainRemainingBatchesAsync()
     {
-        var batch = dataBuffer.Drain(_options.MaxBatchSize);
-        await ProcessBatchAsync(batch, cancellationToken);
+        await foreach (var batch in _batcher.CreateBatchesAsync(CancellationToken.None))
+        {
+            await ProcessBatchAsync(batch, CancellationToken.None);
+        }
     }
 
-    private async Task ProcessBatchAsync(List<Message<SensorData>> batch, CancellationToken cancellationToken)
+    private async Task ProcessBatchAsync(IReadOnlyCollection<Message<SensorData>> batch,
+        CancellationToken cancellationToken)
     {
         _logger.LogInformation("Processing batch of: {Size}", batch.Count);
 
@@ -67,60 +71,70 @@ public class SensorDataConsumer
             return;
         }
 
-        var (toWrite, toDiscard) = _deduplicator.Deduplicate(batch);
-
-        await toDiscard.AckAllAsync(_logger);
+        var latestBySensor = batch
+            .GroupBy(m => m.Data.SensorId)
+            .Select(g => g.MaxBy(m => m.Data.Timestamp)!);
 
         try
         {
-            // Ошибка DataValidationException сюда не попадет, тк продюсер ее не пропустит. Поэтому проверяем только на 1 ошибку 
-            await _destination.WriteBatchAsync(toWrite.Select(m => m.Data), cancellationToken);
-            await toWrite.AckAllAsync(_logger);
+            await _destination.WriteBatchAsync(latestBySensor.Select(m => m.Data), cancellationToken);
+            await batch.AckAllAsync(_logger);
         }
-        catch (DbUpdateException updateException)
+        catch (DataValidationException ex)
         {
-            _logger.LogError(updateException, "Failed to write batch of {Count} messages. Requesting.", toWrite.Count);
-
-            // Либо можно рекурсивно сохранить только валидные сообщения
-            var (failed, healthy) = IsolateFailedEntries(updateException, toWrite);
-
-            // Исходим из того, что это ошибка указывает на то, что есть запись с более поздней датой.
-            // Если есть другие ошибки, то нужно проверять на коды или использовать более явные ошибки
-            await failed.NackAllAsync(requeue: false, _logger);
-            await healthy.NackAllAsync(requeue: true,
-                _logger); // Повторно попробуем их сохранить потом, если они все еще будут актуальны
+            _logger.LogError(ex, "DataValidation failed for batch of {Count} messages", batch.Count);
+            await WriteLatestPerSensorAsync(batch, cancellationToken);
         }
-        catch (Exception ex)
+        catch (DbUpdateException ex)
         {
-            _logger.LogError(ex, "Failed to write batch of {Count} messages. Requesting.", toWrite.Count);
-
-            await toWrite.NackAllAsync(requeue: false, _logger); // Нет смысла пытаться падать снова и снова, когда эти данные повторно прилетят
+            _logger.LogError(ex, "DbUpdate failed for batch of {Count} messages", batch.Count);
+            await WriteLatestPerSensorAsync(batch, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Unexpected error writing batch of {Count} messages", batch.Count);
+            await WriteLatestPerSensorAsync(batch, cancellationToken);
         }
     }
 
-    private (List<Message<SensorData>> failed, List<Message<SensorData>> healthy)
-        IsolateFailedEntries(DbUpdateException ex, List<Message<SensorData>> messages)
+    private async Task WriteLatestPerSensorAsync(IReadOnlyCollection<Message<SensorData>> messages,
+        CancellationToken token)
     {
-        var failedIds = ex.Entries
-            .Select(e => e.Entity)
-            .OfType<SensorData>()
-            .Select(s => s.SensorId)
-            .ToHashSet();
-
-        if (failedIds.Count == 0)
+        // можно через Parallel обрабатывать для каждого сенсора
+        foreach (var messageGroup in messages.GroupBy(message => message.Data.SensorId))
         {
-            // Не можем изолировать — считаем весь батч проблемным
-            _logger.LogWarning("DbUpdateException has no Entries, cannot isolate failed messages.");
-            return (messages, []);
+            var hasAnySavedSensorData = false;
+            
+            foreach (var message in messageGroup.OrderByDescending(m => m.Data.Timestamp))
+            {
+                if (hasAnySavedSensorData)
+                {
+                    await message.AckAsync();
+                    continue;
+                }
+
+                try
+                {
+                    await _destination.WriteBatchAsync([message.Data], token);
+                    await message.AckAsync();
+                    hasAnySavedSensorData = true;
+                }
+                catch (DataValidationException)
+                {
+                    _logger.LogError("DataValidation failed for message: {Message}", message.Data);
+                    await message.NackAsync(false);
+                }
+                catch (DbUpdateException)
+                {
+                    _logger.LogError("DbUpdate failed for message: {Message}", message.Data);
+                    await message.NackAsync(true);
+                }
+                catch
+                {
+                    _logger.LogError("Unexpected error writing message: {Message}", message.Data);
+                    await message.NackAsync(true);
+                }
+            }
         }
-
-        // к этому моменту мы уже сделали дедупликацию и у нас нет сообщений с несколькими sensorId
-        var failed = messages.Where(message => failedIds.Contains(message.Data.SensorId)).ToList();
-        var healthy = messages.Where(message => !failedIds.Contains(message.Data.SensorId)).ToList();
-
-        _logger.LogWarning("Isolated {FailedCount} failed entries out of {Total}.",
-            failed.Count, messages.Count);
-
-        return (failed, healthy);
     }
 }

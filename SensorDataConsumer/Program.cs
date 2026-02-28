@@ -10,12 +10,12 @@ services.AddLogging(b => b.AddConsole().AddDebug());
 
 services.AddSingleton<SensorProcessor>();
 services.AddSingleton<SensorDataProducer>();
-services.AddSingleton<SensorDataDeduplicator>();
+services.AddSingleton<MessageBatcher>();
+services.AddSingleton<SensorDataQueue>();
 services.AddSingleton<SensorDataConsumer.Services.SensorDataConsumer>();
 services.AddSingleton<SensorProcessorOptions>();
 services.AddSingleton<IDataDestination, RetryingDataDestination>();
 services.AddSingleton<IMessageSource, FakeMessageSource>();
-services.AddSingleton<IDataValidator, FakeDataValidator>();
 
 var provider = services.BuildServiceProvider();
 

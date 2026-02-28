@@ -44,13 +44,7 @@ public sealed class MessageBatcher
             yield return batch;
         }
     }
-
-    /// <summary>
-    /// Внутренний цикл чтения. Вынесен отдельно, чтобы yield return
-    /// не находился внутри try/catch (ограничение C#).
-    /// При отмене ct — завершается штатно (без исключения),
-    /// позволяя вызывающему коду сделать финальный drain.
-    /// </summary>
+    
     private async IAsyncEnumerable<List<Message<SensorData>>> ReadBatchesAsync(
         ChannelReader<Message<SensorData>> reader,
         List<Message<SensorData>> batch,

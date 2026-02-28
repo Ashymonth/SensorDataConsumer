@@ -38,11 +38,6 @@ public class SensorDataConsumer
  
                 return; // канал закрыт штатно
             }
-            catch (OperationCanceledException)
-            {
-                await DrainRemainingBatchesAsync();
-                return;
-            }
             catch (Exception ex)
             {
                 consecutiveFailures++;
@@ -59,14 +54,6 @@ public class SensorDataConsumer
         }
     }
     
-    private async Task DrainRemainingBatchesAsync()
-    {
-        await foreach (var batch in _batcher.CreateBatchesAsync(CancellationToken.None))
-        {
-            await ProcessBatchAsync(batch, CancellationToken.None);
-        }
-    }
-
     private async Task ProcessBatchAsync(IReadOnlyCollection<Message<SensorData>> batch,
         CancellationToken cancellationToken)
     {

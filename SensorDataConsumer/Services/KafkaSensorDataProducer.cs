@@ -34,7 +34,8 @@ public class KafkaSensorDataProducer : IDisposable
         var message = new Message<string, string>
         {
             Key = key,
-            Value = JsonSerializer.Serialize(data)
+            Value = JsonSerializer.Serialize(data),
+            Timestamp = new Timestamp(data.Timestamp)
         };
 
         try

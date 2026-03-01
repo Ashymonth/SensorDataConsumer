@@ -6,14 +6,14 @@ using SensorDataConsumer.Services;
 
 namespace SensorDataConsumer.Background;
 
-public class KafkaConsumer : BackgroundService
+public class KafkaConsumerBackgroundService : BackgroundService
 {
     private readonly KafkaSensorDataConsumer _kafkaConsumer;
     private readonly IDataDestination _destination;
-    private readonly ILogger<KafkaConsumer> _logger;
+    private readonly ILogger<KafkaConsumerBackgroundService> _logger;
 
-    public KafkaConsumer(KafkaSensorDataConsumer kafkaConsumer, IDataDestination destination,
-        ILogger<KafkaConsumer> logger)
+    public KafkaConsumerBackgroundService(KafkaSensorDataConsumer kafkaConsumer, IDataDestination destination,
+        ILogger<KafkaConsumerBackgroundService> logger)
     {
         _kafkaConsumer = kafkaConsumer;
         _destination = destination;

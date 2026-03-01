@@ -7,16 +7,16 @@ using SensorDataConsumer.Services;
 
 namespace SensorDataConsumer.Background;
 
-public class KafkaProducer : BackgroundService
+public class KafkaProducerBackgroundService : BackgroundService
 {
     private readonly IMessageSource _messageSource;
     private readonly KafkaSensorDataProducer _kafkaProducer;
-    private readonly ILogger<KafkaProducer> _logger;
+    private readonly ILogger<KafkaProducerBackgroundService> _logger;
 
-    public KafkaProducer(
+    public KafkaProducerBackgroundService(
         IMessageSource messageSource,
         KafkaSensorDataProducer kafkaProducer,
-        ILogger<KafkaProducer> logger)
+        ILogger<KafkaProducerBackgroundService> logger)
     {
         _messageSource = messageSource;
         _kafkaProducer = kafkaProducer;

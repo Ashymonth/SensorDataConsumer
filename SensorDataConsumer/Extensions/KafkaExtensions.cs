@@ -13,7 +13,7 @@ public static class KafkaExtensions
             services.AddSingleton<SensorDataProducer>();
             services.AddSingleton<KafkaSensorDataProducer>();
 
-            services.AddHostedService<KafkaConsumer>();
+            services.AddHostedService<KafkaConsumerBackgroundService>();
 
             return services;
         }
@@ -22,7 +22,7 @@ public static class KafkaExtensions
         {
             services.AddSingleton<KafkaSensorDataConsumer>();
 
-            services.AddHostedService<KafkaProducer>();
+            services.AddHostedService<KafkaProducerBackgroundService>();
 
             return services;
         }

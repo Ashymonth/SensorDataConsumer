@@ -5,7 +5,6 @@ using SensorDataConsumer.Background;
 using SensorDataConsumer.Models;
 
 namespace SensorDataConsumer.Services;
- 
 
 public sealed class KafkaSensorDataConsumer : IDisposable
 {
@@ -21,14 +20,14 @@ public sealed class KafkaSensorDataConsumer : IDisposable
         _logger = logger;
 
         _consumer = new ConsumerBuilder<string, SensorData>(new ConsumerConfig
-        {
-            BootstrapServers = _options.BootstrapServers,
-            GroupId = _options.GroupId,
-            AutoOffsetReset = AutoOffsetReset.Earliest,
-            EnableAutoCommit = false
-        })
-        .SetValueDeserializer(new SystemTextJsonSerializer())
-        .Build();
+            {
+                BootstrapServers = _options.BootstrapServers,
+                GroupId = _options.GroupId,
+                AutoOffsetReset = AutoOffsetReset.Earliest,
+                EnableAutoCommit = false
+            })
+            .SetValueDeserializer(new SystemTextJsonSerializer())
+            .Build();
 
         _consumer.Subscribe(_options.Topic);
 
@@ -46,13 +45,17 @@ public sealed class KafkaSensorDataConsumer : IDisposable
         {
             var remaining = deadline - DateTime.UtcNow;
             if (remaining <= TimeSpan.Zero)
+            {
                 break;
+            }
 
             try
             {
                 var result = _consumer.Consume(remaining);
                 if (result is null)
+                {
                     break;
+                }
 
                 batch.Add(result.Message.Value);
             }

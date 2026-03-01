@@ -18,7 +18,7 @@ builder.Services.AddSingleton<SensorDataConsumer.Services.SensorDataConsumer>();
 builder.Services.AddSingleton<KafkaOptions>();
 
 builder.Services.AddSingleton<IDataDestination, RetryingDataDestination>();
-builder.Services.AddSingleton<IMessageSource, FakeMessageSource>();
+builder.Services.AddTransient<IMessageSource, FakeMessageSource>();
 
 builder.Services.AddHostedService<SensorProcessorBackgroundService>();
 

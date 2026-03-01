@@ -46,7 +46,7 @@ public class KafkaConsumer : BackgroundService
 
     private async Task ProcessBatchAsync(List<SensorData> batch, CancellationToken ct)
     {
-        _logger.LogInformation("Processing batch of {Count} messages", batch.Count);
+        _logger.LogInformation("Processing batch of {Count} messages in Kafka consumer", batch.Count);
 
         var latestBySensor = batch.GroupBy(d => d.SensorId).Select(g => g.MaxBy(d => d.Timestamp)!);
 

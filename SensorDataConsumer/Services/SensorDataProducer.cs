@@ -20,15 +20,15 @@ public class SensorDataProducer
     {
         while (true)
         {
-            // var message = await _source.ReceiveAsync(ct);
-            //
-            // if (message is null)
-            // {
-            //     _logger.LogInformation("Source exhausted, stopping producer");
-            //     return;
-            // }
-            //
-            // await _dataQueue.Writer.WriteAsync(message, ct);
+            var message = await _source.ReceiveAsync(ct);
+
+            if (message is null)
+            {
+                _logger.LogInformation("Source exhausted, stopping producer");
+                return;
+            }
+
+            await _dataQueue.Writer.WriteAsync(message, ct);
         }
     }
 }

@@ -7,7 +7,7 @@ namespace SensorDataConsumer;
 public class FakeMessageSource : IMessageSource
 {
     private static readonly Faker _faker = new();
-    private static readonly PeriodicTimer _periodicTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(1));
+    private readonly PeriodicTimer _periodicTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(1));
 
     private static readonly string[] _sensorIds = ["1", "2", "3", "4", "5", "6"];
 

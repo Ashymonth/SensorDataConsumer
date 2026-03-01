@@ -102,7 +102,7 @@ public class SensorDataConsumer
             {
                 if (hasAnySavedSensorData)
                 {
-                    await message.AckAsync();
+                    await message.AckSaveAsync(_logger);
                     continue;
                 }
 
@@ -114,8 +114,11 @@ public class SensorDataConsumer
                 }
                 catch (DataValidationException)
                 {
-                    _logger.LogError("DataValidation failed for message: {Message}", message.Data);
-                    await message.NackAsync(false);
+                    _logger.LogError("DataValidation failed. SensorId={SensorId}, Timestamp={Timestamp}",
+                        message.Data.SensorId,
+                        message.Data.Timestamp);
+                    
+                    await message.NackSaveAsync(false, _logger);
                 }
                 catch (DbUpdateException)
                 {
@@ -123,12 +126,12 @@ public class SensorDataConsumer
                     
                     // в случае если можем получить точную причину ошибки в DbUpdateException, то можем по разному ack/nack делать,
                     // но в таком виде считаем, что может быть транзитная ошибка БД и ретраим сообщение
-                    await message.NackAsync(true);
+                    await message.NackSaveAsync(true, _logger);
                 }
                 catch
                 {
                     _logger.LogError("Unexpected error writing message: {Message}", message.Data);
-                    await message.NackAsync(true);
+                    await message.NackSaveAsync(true, _logger);
                 }
             }
         }

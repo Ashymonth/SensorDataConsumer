@@ -10,10 +10,10 @@ public sealed class SensorDataQueue
 {
     private readonly Channel<Message<SensorData>> _channel;
 
-    public SensorDataQueue(SensorProcessorOptions options)
+    public SensorDataQueue(KafkaOptions options)
     {
         _channel = Channel.CreateBounded<Message<SensorData>>(
-            new BoundedChannelOptions(options.MaxMessageBufferSize)
+            new BoundedChannelOptions(options.MaxBatchSize)
             {
                 SingleReader = true,
                 SingleWriter = true,
@@ -24,6 +24,4 @@ public sealed class SensorDataQueue
     public ChannelReader<Message<SensorData>> Reader => _channel.Reader;
 
     public ChannelWriter<Message<SensorData>> Writer => _channel.Writer;
-
-    public void Complete(Exception? ex = null) => _channel.Writer.Complete(ex);
 }

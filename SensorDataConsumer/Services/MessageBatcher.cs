@@ -10,7 +10,7 @@ public sealed class MessageBatcher
     private readonly TimeSpan _flushInterval;
     private readonly SensorDataQueue _dataQueue;
 
-    public MessageBatcher(SensorProcessorOptions options, SensorDataQueue dataQueue)
+    public MessageBatcher(KafkaOptions options, SensorDataQueue dataQueue)
     {
         _maxBatchSize = options.MaxBatchSize;
         _flushInterval = options.FlushInterval;

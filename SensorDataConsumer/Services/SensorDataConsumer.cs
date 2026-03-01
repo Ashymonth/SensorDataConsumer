@@ -25,7 +25,7 @@ public class SensorDataConsumer
         // можно так же вынести в конфиг
         var consecutiveFailures = 0;
         const int maxConsecutiveFailures = 3;
-
+        
         while (!ct.IsCancellationRequested)
         {
             try

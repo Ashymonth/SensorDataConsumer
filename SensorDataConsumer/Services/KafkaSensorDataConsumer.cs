@@ -76,7 +76,22 @@ public sealed class KafkaSensorDataConsumer : IDisposable
         return batch;
     }
 
-    public void Commit() => _consumer.Commit();
+    public void Commit()
+    {
+        try
+        {
+            _consumer.Commit();
+        }
+        catch (TopicPartitionOffsetException ex)
+        {
+            _logger.LogError(ex, "Partial commit failure: {Results}",
+                string.Join(", ", ex.Results.Select(r => $"{r.TopicPartition}={r.Error}")));
+        }
+        catch (KafkaException ex)
+        {
+            _logger.LogError(ex, "Failed to commit offset, may cause reprocessing");
+        }
+    }
 
     public void Dispose()
     {

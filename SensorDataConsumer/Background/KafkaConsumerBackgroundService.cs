@@ -67,17 +67,9 @@ public class KafkaConsumerBackgroundService : BackgroundService
         {
             throw;
         }
-        catch (DataValidationException ex)
-        {
-            _logger.LogWarning(ex, "Batch-level validation failed, falling back to per-sensor");
-        }
-        catch (DbUpdateException ex)
-        {
-            _logger.LogError(ex, "Database error on batch → falling back");
-        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unexpected error on batch");
+            _logger.LogWarning(ex, "Batch write failed, falling back to per-sensor");
         }
 
         await WriteLatestPerSensorAsync(batch, ct);
@@ -103,22 +95,25 @@ public class KafkaConsumerBackgroundService : BackgroundService
                     sensorSaved = true;
                     _logger.LogDebug("Saved sensor {SensorId}", sensorId);
                 }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
                 catch (DataValidationException ex)
                 {
-                    _logger.LogWarning(ex, "Validation failed for sensor {SensorId} dropping message", sensorId);
-                }
-                catch (DbUpdateException ex)
-                {
-                    _logger.LogError(ex, "DB error for sensor {SensorId} dropping after retries", sensorId);
-                    if (await RetryWriteAsync(data, ct))
-                    {
-                        sensorSaved = true;
-                    }
+                    _logger.LogWarning(ex,
+                        "Validation failed for sensor {SensorId}, trying older value",
+                        group.Key);
+                    // пробуем следующее значение
                 }
                 catch (Exception ex)
                 {
-                    // можно так же вынести в dlq
-                    _logger.LogError(ex, "Unexpected error for sensor {SensorId} dropping", sensorId);
+                    _logger.LogError(ex, "Write failed for sensor {SensorId}, retrying", group.Key);
+
+                    if (await RetryWriteAsync(data, ct))
+                    {
+                        break;
+                    }
                 }
             }
         }
@@ -126,6 +121,7 @@ public class KafkaConsumerBackgroundService : BackgroundService
 
     private async Task<bool> RetryWriteAsync(SensorData data, CancellationToken ct)
     {
+        // значения брать из конфига
         for (var attempt = 1; attempt <= 3; attempt++)
         {
             try
@@ -134,7 +130,16 @@ public class KafkaConsumerBackgroundService : BackgroundService
                 await _destination.WriteBatchAsync([data], ct);
                 return true;
             }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (DataValidationException ex)
+            {
+                _logger.LogWarning(ex, "Validation failed for sensor {SensorId} dropping message", data.SensorId);
+                return false;
+
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Retry {Attempt}/3 failed for sensor {SensorId}",

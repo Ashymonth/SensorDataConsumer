@@ -33,9 +33,16 @@ public class KafkaConsumerBackgroundService : BackgroundService
                     continue;
                 }
 
-                await ProcessBatchAsync(batch, stoppingToken);
-
-                _kafkaConsumer.Commit();
+                try
+                {
+                    await ProcessBatchAsync(batch, stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Batch processing failed, committing to avoid reprocessing");
+                }
+                
+                _kafkaConsumer.Commit();    
             }
         }
         finally
@@ -119,7 +126,6 @@ public class KafkaConsumerBackgroundService : BackgroundService
 
     private async Task<bool> RetryWriteAsync(SensorData data, CancellationToken ct)
     {
-        // вынести в конфиг
         for (var attempt = 1; attempt <= 3; attempt++)
         {
             try
@@ -128,9 +134,11 @@ public class KafkaConsumerBackgroundService : BackgroundService
                 await _destination.WriteBatchAsync([data], ct);
                 return true;
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Retry {Attempt}/3 failed for sensor {SensorId}", attempt, data.SensorId);
+                _logger.LogWarning(ex, "Retry {Attempt}/3 failed for sensor {SensorId}",
+                    attempt, data.SensorId);
             }
         }
 

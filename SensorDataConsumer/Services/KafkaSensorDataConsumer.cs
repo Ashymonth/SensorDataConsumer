@@ -65,6 +65,12 @@ public sealed class KafkaSensorDataConsumer : IDisposable
                     "Malformed message skipped at offset {Offset}",
                     ex.ConsumerRecord?.Offset);
             }
+            
+            catch (KafkaException ex)
+            {
+                _logger.LogError(ex, "Kafka connection error, returning partial batch");
+                break; // отдаём что успели прочитать
+            }
         }
 
         return batch;

@@ -10,7 +10,7 @@ public sealed class MessageBatcher
     private readonly TimeSpan _flushInterval;
     private readonly SensorDataQueue _dataQueue;
 
-    public MessageBatcher(SensorProcessorOptions options, SensorDataQueue dataQueue)
+    public MessageBatcher(KafkaOptions options, SensorDataQueue dataQueue)
     {
         _maxBatchSize = options.MaxBatchSize;
         _flushInterval = options.FlushInterval;
@@ -36,7 +36,7 @@ public sealed class MessageBatcher
             batch = new List<Message<SensorData>>(_maxBatchSize);
         }
 
-        // Канал закрыт или ct отменён — забираем остатки
+        // Канал закрыт, или ct отменён — забираем остатки
         FillBatch(reader, batch);
 
         if (batch.Count > 0)
@@ -88,6 +88,7 @@ public sealed class MessageBatcher
             }
         }
         
+        // финальный вызов после закрытия, если что-то осталось
         if (batch.Count > 0)
         {
             yield return batch;

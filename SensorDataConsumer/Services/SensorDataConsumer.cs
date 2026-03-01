@@ -25,7 +25,7 @@ public class SensorDataConsumer
         // можно так же вынести в конфиг
         var consecutiveFailures = 0;
         const int maxConsecutiveFailures = 3;
-
+        
         while (!ct.IsCancellationRequested)
         {
             try
@@ -57,7 +57,7 @@ public class SensorDataConsumer
     private async Task ProcessBatchAsync(IReadOnlyCollection<Message<SensorData>> batch,
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Processing batch of: {Size}", batch.Count);
+        _logger.LogInformation("Processing batch of: {Size} in Channel", batch.Count);
 
         if (batch.Count == 0)
         {

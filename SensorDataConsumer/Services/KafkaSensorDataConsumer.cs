@@ -74,6 +74,11 @@ public sealed class KafkaSensorDataConsumer : IDisposable
 
     public void Commit(IReadOnlyList<ConsumeResult<string, SensorData>> batch)
     {
+        if (batch.Count == 0)
+        {
+            return;
+        }
+        
         Commit(batch.MaxBy(r => r.Offset)!);
     }
 

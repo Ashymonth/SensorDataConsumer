@@ -1,3 +1,4 @@
+using Confluent.Kafka;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SensorDataConsumer.Abstractions;
@@ -22,45 +23,41 @@ public class KafkaConsumerBackgroundService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        try
+        while (!stoppingToken.IsCancellationRequested)
         {
-            while (!stoppingToken.IsCancellationRequested)
+            var batch = _kafkaConsumer.ConsumeBatch(stoppingToken);
+            if (batch.Count == 0)
             {
-                var batch = _kafkaConsumer.ConsumeBatch(stoppingToken);
-
-                if (batch.Count == 0)
-                {
-                    continue;
-                }
-
-                try
-                {
-                    await ProcessBatchAsync(batch, stoppingToken);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Batch processing failed, committing to avoid reprocessing");
-                }
-                
-                _kafkaConsumer.Commit();    
+                continue;
             }
-        }
-        finally
-        {
-            _logger.LogInformation("Closing Kafka consumer");
+
+            // словарь для быстрого поиска offset по данным
+            var offsetMap = batch.ToDictionary(r => r.Message.Value, r => r);
+
+            try
+            {
+                var messages = batch.Select(r => r.Message.Value).ToList();
+                await ProcessBatchAsync(messages, offsetMap, stoppingToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Batch processing failed, committing to avoid reprocessing");
+            }
+
+            _kafkaConsumer.Commit(batch);
         }
     }
 
-    private async Task ProcessBatchAsync(List<SensorData> batch, CancellationToken ct)
+    private async Task ProcessBatchAsync(
+        List<SensorData> batch,
+        Dictionary<SensorData, ConsumeResult<string, SensorData>> offsetMap,
+        CancellationToken ct)
     {
-        _logger.LogInformation("Processing batch of {Count} messages in Kafka consumer", batch.Count);
-
         var latestBySensor = batch.GroupBy(d => d.SensorId).Select(g => g.MaxBy(d => d.Timestamp)!);
 
         try
         {
             await _destination.WriteBatchAsync(latestBySensor, ct);
-            _logger.LogDebug("Batch processed successfully");
             return;
         }
         catch (OperationCanceledException)
@@ -72,28 +69,28 @@ public class KafkaConsumerBackgroundService : BackgroundService
             _logger.LogWarning(ex, "Batch write failed, falling back to per-sensor");
         }
 
-        await WriteLatestPerSensorAsync(batch, ct);
+        await WriteLatestPerSensorAsync(batch, offsetMap, ct);
     }
 
-    private async Task WriteLatestPerSensorAsync(List<SensorData> batch, CancellationToken ct)
+    private async Task WriteLatestPerSensorAsync(
+        List<SensorData> batch,
+        Dictionary<SensorData, ConsumeResult<string, SensorData>> offsetMap,
+        CancellationToken ct)
     {
         foreach (var group in batch.GroupBy(d => d.SensorId))
         {
-            var sensorId = group.Key;
-            var sensorSaved = false;
-
             foreach (var data in group.OrderByDescending(d => d.Timestamp))
             {
-                if (sensorSaved)
-                {
-                    break;
-                }
-
                 try
                 {
                     await _destination.WriteBatchAsync([data], ct);
-                    sensorSaved = true;
-                    _logger.LogDebug("Saved sensor {SensorId}", sensorId);
+
+                    if (offsetMap.TryGetValue(data, out var result))
+                    {
+                        _kafkaConsumer.Commit(result);
+                    }
+
+                    break;
                 }
                 catch (OperationCanceledException)
                 {
@@ -101,19 +98,13 @@ public class KafkaConsumerBackgroundService : BackgroundService
                 }
                 catch (DataValidationException ex)
                 {
-                    _logger.LogWarning(ex,
-                        "Validation failed for sensor {SensorId}, trying older value",
-                        group.Key);
-                    // пробуем следующее значение
+                    _logger.LogWarning(ex, "Validation failed for {SensorId}, trying older", data.SensorId);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Write failed for sensor {SensorId}, retrying", group.Key);
-
+                    _logger.LogError(ex, "Write failed for {SensorId}", data.SensorId);
                     if (await RetryWriteAsync(data, ct))
-                    {
                         break;
-                    }
                 }
             }
         }
@@ -138,7 +129,6 @@ public class KafkaConsumerBackgroundService : BackgroundService
             {
                 _logger.LogWarning(ex, "Validation failed for sensor {SensorId} dropping message", data.SensorId);
                 return false;
-
             }
             catch (Exception ex)
             {

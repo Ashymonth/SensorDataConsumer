@@ -24,7 +24,8 @@ public sealed class KafkaSensorDataConsumer : IDisposable
                 BootstrapServers = _options.BootstrapServers,
                 GroupId = _options.GroupId,
                 AutoOffsetReset = AutoOffsetReset.Earliest,
-                EnableAutoCommit = false
+                EnableAutoCommit = false,
+                EnableAutoOffsetStore = false,
             })
             .SetValueDeserializer(new SystemTextJsonSerializer())
             .Build();
@@ -36,28 +37,24 @@ public sealed class KafkaSensorDataConsumer : IDisposable
             _options.Topic, _options.GroupId);
     }
 
-    public List<SensorData> ConsumeBatch(CancellationToken ct)
+    public List<ConsumeResult<string, SensorData>> ConsumeBatch(CancellationToken ct)
     {
-        var batch = new List<SensorData>(_options.MaxBatchSize);
+        var batch = new List<ConsumeResult<string, SensorData>>(_options.MaxBatchSize);
         var deadline = DateTime.UtcNow + _options.FlushInterval;
 
         while (batch.Count < _options.MaxBatchSize && !ct.IsCancellationRequested)
         {
             var remaining = deadline - DateTime.UtcNow;
             if (remaining <= TimeSpan.Zero)
-            {
                 break;
-            }
 
             try
             {
                 var result = _consumer.Consume(remaining);
                 if (result is null)
-                {
                     break;
-                }
 
-                batch.Add(result.Message.Value);
+                batch.Add(result); // сохраняем result целиком
             }
             catch (ConsumeException ex)
             {
@@ -65,22 +62,26 @@ public sealed class KafkaSensorDataConsumer : IDisposable
                     "Malformed message skipped at offset {Offset}",
                     ex.ConsumerRecord?.Offset);
             }
-            
             catch (KafkaException ex)
             {
                 _logger.LogError(ex, "Kafka connection error, returning partial batch");
-                break; // отдаём что успели прочитать
+                break;
             }
         }
 
         return batch;
     }
 
-    public void Commit()
+    public void Commit(IReadOnlyList<ConsumeResult<string, SensorData>> batch)
+    {
+        Commit(batch.MaxBy(r => r.Offset)!);
+    }
+
+    public void Commit(ConsumeResult<string, SensorData> batch)
     {
         try
         {
-            _consumer.Commit();
+            _consumer.Commit(batch);
         }
         catch (TopicPartitionOffsetException ex)
         {
